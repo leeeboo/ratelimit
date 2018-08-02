@@ -61,6 +61,7 @@ type Result struct {
 func (this *Bucket) Take(quota int) (*Result, error) {
 
 	conn := redisPool.Get()
+	defer conn.Close()
 
 	reply, err := conn.Do("CL.THROTTLE", this.Key, this.Capacity, this.CountPerPeriod, this.Period, quota)
 
