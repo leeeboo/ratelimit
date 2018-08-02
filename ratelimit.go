@@ -2,12 +2,13 @@ package ratelimit
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/caarlos0/env"
 	"github.com/garyburd/redigo/redis"
 )
 
-var redisClient redis.Conn
+var redisPool *redis.Pool
 
 type Config struct {
 	Host string `env:"RATELIMIT_REDIS_HOST"`
@@ -28,7 +29,7 @@ func init() {
 		panic("Need ENV `RATELIMIT_REDIS_HOST`, `RATELIMIT_REDIS_PORT`")
 	}
 
-	redisClient = newRedisClient(cfg)
+	redisPool = newRedisPool(cfg)
 }
 
 type Bucket struct {
@@ -59,7 +60,9 @@ type Result struct {
 
 func (this *Bucket) Take(quota int) (*Result, error) {
 
-	reply, err := redisClient.Do("CL.THROTTLE", this.Key, this.Capacity, this.CountPerPeriod, this.Period, quota)
+	conn := redisPool.Get()
+
+	reply, err := conn.Do("CL.THROTTLE", this.Key, this.Capacity, this.CountPerPeriod, this.Period, quota)
 
 	if err != nil {
 		return nil, err
@@ -86,18 +89,25 @@ func (this *Bucket) Take(quota int) (*Result, error) {
 	return result, nil
 }
 
-func newRedisClient(cfg Config) redis.Conn {
+func newRedisPool(cfg Config) *redis.Pool {
 
-	client, err := redis.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port))
-
-	if err != nil {
-		panic(err)
+	return &redis.Pool{
+		MaxIdle:     3,
+		IdleTimeout: 240 * time.Second,
+		Dial: func() (redis.Conn, error) {
+			c, err := redis.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port))
+			if err != nil {
+				return nil, err
+			}
+			if _, err := c.Do("SELECT", cfg.Db); err != nil {
+				c.Close()
+				return nil, err
+			}
+			return c, err
+		},
+		TestOnBorrow: func(c redis.Conn, t time.Time) error {
+			_, err := c.Do("PING")
+			return err
+		},
 	}
-
-	if _, err := client.Do("SELECT", cfg.Db); err != nil {
-		client.Close()
-		panic(err)
-	}
-
-	return client
 }
