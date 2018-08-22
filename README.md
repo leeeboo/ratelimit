@@ -15,7 +15,7 @@ func test() {
 
     b := ratelimit.NewBucket(key, capacity, countPerPeriod, period)
 
-	res, err := b.Take(1)
+    res, err := b.Take(1)
 
     if !res.Allow {
 
